@@ -68,8 +68,10 @@ export async function notifyOrder(
   env: Env,
   order: OrderNotification,
 ): Promise<NotifyResult> {
-  const token = env.TELEGRAM_BOT_TOKEN;
-  const chatId = env.TELEGRAM_CHAT_ID;
+  // .trim() vì dán token vào `wrangler secret put` rất dễ lẫn khoảng trắng
+  // hoặc ký tự xuống dòng — token có dư một space là Telegram trả 404.
+  const token = String(env.TELEGRAM_BOT_TOKEN ?? "").trim();
+  const chatId = String(env.TELEGRAM_CHAT_ID ?? "").trim();
 
   if (!token || !chatId) {
     return { ok: false, reason: "chưa cấu hình TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID" };
@@ -101,13 +103,22 @@ export async function notifyOrder(
   if (res.ok) return { ok: true };
 
   // Telegram trả JSON kèm `description` giải thích lỗi — hữu ích hơn status
-  // code trơn (403 = khách chưa bấm Start, 400 = chat_id sai...).
+  // code trơn. Thêm gợi ý cho hai mã hay gặp nhất để lần sau đọc là biết
+  // ngay phải sửa gì, không phải đi đoán.
   let detail = `HTTP ${res.status}`;
   try {
     const body = (await res.json()) as { description?: string };
     if (body?.description) detail += `: ${body.description}`;
   } catch {
     // body không phải JSON -> giữ nguyên status code
+  }
+
+  if (res.status === 404) {
+    detail += " — TELEGRAM_BOT_TOKEN sai hoặc đã bị revoke";
+  } else if (res.status === 400) {
+    detail += " — TELEGRAM_CHAT_ID sai (group phải giữ dấu -)";
+  } else if (res.status === 403) {
+    detail += " — người nhận chưa bấm Start hoặc đã block bot";
   }
 
   return { ok: false, reason: detail };
