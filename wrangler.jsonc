@@ -28,6 +28,10 @@
     }
   ],
 
+  // Secrets (KHONG de o day - set bang ):
+  //   TELEGRAM_BOT_TOKEN  - tu @BotFather
+  //   TELEGRAM_CHAT_ID    - tu getUpdates (group la so am)
+
   "vars": {
     // Bảng giá do SERVER dùng để tính tổng — client không được tin.
     // public/script.js có bản sao để hiển thị; sửa giá phải sửa CẢ HAI.

@@ -8,6 +8,8 @@
  * và không bao giờ đi vào query string.
  */
 
+import { notifyOrder, type OrderNotification } from "./telegram";
+
 const MAX_QTY = 3;
 
 /** Chặn bot: tối đa N đơn từ cùng một IP trong khoảng thời gian dưới. */
@@ -119,7 +121,11 @@ function parseOrder(
 
 // ------------------------------------------------------------- handler
 
-async function handleOrder(request: Request, env: Env): Promise<Response> {
+async function handleOrder(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+): Promise<Response> {
   let payload: unknown;
   try {
     payload = await request.json();
@@ -212,18 +218,73 @@ async function handleOrder(request: Request, env: Env): Promise<Response> {
   // Không log tên / số điện thoại / địa chỉ — đây là dữ liệu cá nhân.
   log("order.created", { id, qty: order.qty, total, country });
 
+  // Đơn đã nằm an toàn trong D1. Báo Telegram ở background: khách không phải
+  // chờ, và Telegram lỗi cũng không làm mất đơn.
+  ctx.waitUntil(
+    notifyAndRecord(env, {
+      id,
+      name: order.name,
+      phone: order.phone,
+      address: order.address,
+      qty: order.qty,
+      total,
+    }),
+  );
+
   return json({ ok: true, id }, 201);
 }
 
+/**
+ * Bắn Telegram rồi ghi kết quả vào D1. Đơn nào `notified = 0` là chưa báo
+ * được — cột `notify_error` cho biết vì sao.
+ */
+async function notifyAndRecord(
+  env: Env,
+  order: OrderNotification,
+): Promise<void> {
+  const result = await notifyOrder(env, order);
+
+  // Chỉ log kết quả, không log nội dung tin nhắn (chứa dữ liệu cá nhân).
+  log("order.notified", { id: order.id, ok: result.ok });
+  if (!result.ok) {
+    console.error(
+      JSON.stringify({
+        event: "notify_failed",
+        id: order.id,
+        reason: result.reason,
+      }),
+    );
+  }
+
+  try {
+    await env.DB.prepare(
+      `UPDATE orders
+          SET notified = ?2, notified_at = datetime('now'), notify_error = ?3
+        WHERE id = ?1`,
+    )
+      .bind(order.id, result.ok ? 1 : 0, result.ok ? null : result.reason)
+      .run();
+  } catch (err) {
+    // Ghi trạng thái thất bại thì bỏ qua — đơn vẫn còn, đó là thứ quan trọng.
+    console.error(
+      JSON.stringify({
+        event: "notify_record_failed",
+        id: order.id,
+        message: err instanceof Error ? err.message : String(err),
+      }),
+    );
+  }
+}
+
 export default {
-  async fetch(request, env): Promise<Response> {
+  async fetch(request, env, ctx): Promise<Response> {
     const url = new URL(request.url);
 
     if (url.pathname === "/api/order") {
       if (request.method !== "POST") {
         return fail(405, "method_not_allowed", "Chỉ nhận POST.");
       }
-      return handleOrder(request, env);
+      return handleOrder(request, env, ctx);
     }
 
     if (url.pathname === "/api/health") {
