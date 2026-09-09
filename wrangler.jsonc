@@ -1,0 +1,15 @@
+{
+  // Landing page tĩnh. Không có code Worker nên không cần "main".
+  // Request tới static assets miễn phí và không giới hạn.
+  //
+  // Cùng tên Worker với bản deploy trước nên URL giữ nguyên:
+  //   https://tham-ngai-cuu.truongtruongdatdat15.workers.dev
+  "name": "tham-ngai-cuu",
+  "compatibility_date": "2026-09-09",
+
+  // Nội dung trang nằm riêng trong public/ — mọi file trong thư mục assets
+  // đều được serve CÔNG KHAI, nên không để .git, README hay config lẫn vào.
+  "assets": {
+    "directory": "./public"
+  }
+}
