@@ -33,7 +33,7 @@ Nếu dùng tên miền riêng: **Settings → Pages → Custom domain**, rồi 
 
 | Việc | Ở đâu |
 | --- | --- |
-| Số điện thoại (đang là `0900000000`) | `index.html` — 2 chỗ `href="tel:..."` |
+| Số điện thoại (đang là `0393806942`) | `index.html` — 2 chỗ `href="tel:..."` |
 | Giá, mức giảm theo số lượng, số suất còn lại | `script.js` → `CONFIG` |
 | Nhận đơn thật (server / Google Sheet / CRM) | `script.js` → chỗ `// TODO` trong `submit` |
 | Màu thương hiệu | `styles.css` → `:root` (`--green`, `--red`, `--cream`) |
