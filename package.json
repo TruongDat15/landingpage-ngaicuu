@@ -1,0 +1,32 @@
+{
+  "name": "landingpage-ngaicuu",
+  "version": "1.0.0",
+  "description": "Landing page bán thảm nhiệt ngải cứu — ưu đãi 389.000đ, tặng combo quà 150.000đ. HTML/CSS/JS thuần, không cần build, không phụ thuộc framework.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "typecheck": "wrangler types && tsc --noEmit",
+    "db:migrate:local": "wrangler d1 migrations apply ngaicuu-orders --local",
+    "db:migrate:remote": "wrangler d1 migrations apply ngaicuu-orders --remote",
+    "deploy": "wrangler deploy",
+    "deploy:dry": "wrangler deploy --dry-run",
+    "tail": "wrangler tail"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TruongDat15/landingpage-ngaicuu.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/TruongDat15/landingpage-ngaicuu/issues"
+  },
+  "homepage": "https://github.com/TruongDat15/landingpage-ngaicuu#readme",
+  "devDependencies": {
+    "@types/node": "^26.5.0",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.129.1"
+  },
+  "private": true
+}

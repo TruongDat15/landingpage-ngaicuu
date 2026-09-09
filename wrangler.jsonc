@@ -1,15 +1,44 @@
 {
-  // Landing page tĩnh. Không có code Worker nên không cần "main".
-  // Request tới static assets miễn phí và không giới hạn.
-  //
-  // Cùng tên Worker với bản deploy trước nên URL giữ nguyên:
-  //   https://tham-ngai-cuu.truongtruongdatdat15.workers.dev
+  "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "tham-ngai-cuu",
+  "main": "src/index.ts",
   "compatibility_date": "2026-09-09",
 
   // Nội dung trang nằm riêng trong public/ — mọi file trong thư mục assets
   // đều được serve CÔNG KHAI, nên không để .git, README hay config lẫn vào.
   "assets": {
-    "directory": "./public"
+    "directory": "./public",
+    "binding": "ASSETS",
+
+    // CHỈ những path này đi qua Worker (có tính request). Phần còn lại —
+    // HTML, CSS, JS, ảnh — do asset Worker serve, miễn phí không giới hạn.
+    //
+    // Lưu ý: với run_worker_first, nếu vượt free tier thì các path này nhận
+    // 429 chứ KHÔNG fallback về static asset.
+    "run_worker_first": ["/api/*"]
+  },
+
+  // Đơn hàng từ form. Đây là nguồn sự thật, không phải Google Sheet.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "ngaicuu-orders",
+      "database_id": "dd82aab1-c757-463d-81fe-8da3b595507b",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  "vars": {
+    // Bảng giá do SERVER dùng để tính tổng — client không được tin.
+    // public/script.js có bản sao để hiển thị; sửa giá phải sửa CẢ HAI.
+    // Lệch nhau thì Worker ghi log `price_mismatch`.
+    "UNIT_PRICE": "389000",
+    "QTY_DISCOUNTS": "{\"1\":0,\"2\":20000,\"3\":60000}"
+  },
+
+  "observability": {
+    "enabled": true,
+    "logs": { "enabled": true, "head_sampling_rate": 1 },
+    "traces": { "enabled": true, "head_sampling_rate": 0.05 }
   }
 }
