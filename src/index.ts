@@ -8,6 +8,7 @@
  * và không bao giờ đi vào query string.
  */
 
+import { syncToSheet } from "./sheet";
 import { notifyOrder, type OrderNotification } from "./telegram";
 
 const MAX_QTY = 3;
@@ -218,11 +219,12 @@ async function handleOrder(
   // Không log tên / số điện thoại / địa chỉ — đây là dữ liệu cá nhân.
   log("order.created", { id, qty: order.qty, total, country });
 
-  // Đơn đã nằm an toàn trong D1. Báo Telegram ở background: khách không phải
-  // chờ, và Telegram lỗi cũng không làm mất đơn.
+  // Đơn đã nằm an toàn trong D1. Báo Telegram và đẩy Sheet ở background:
+  // khách không phải chờ, và hai kênh đó lỗi cũng không làm mất đơn.
   ctx.waitUntil(
-    notifyAndRecord(env, {
+    dispatchOrder(env, {
       id,
+      createdAtIso: new Date().toISOString(),
       name: order.name,
       phone: order.phone,
       address: order.address,
@@ -234,41 +236,85 @@ async function handleOrder(
   return json({ ok: true, id }, 201);
 }
 
-/**
- * Bắn Telegram rồi ghi kết quả vào D1. Đơn nào `notified = 0` là chưa báo
- * được — cột `notify_error` cho biết vì sao.
- */
-async function notifyAndRecord(
-  env: Env,
-  order: OrderNotification,
-): Promise<void> {
-  const result = await notifyOrder(env, order);
+type DispatchInput = OrderNotification & { createdAtIso: string };
 
-  // Chỉ log kết quả, không log nội dung tin nhắn (chứa dữ liệu cá nhân).
-  log("order.notified", { id: order.id, ok: result.ok });
-  if (!result.ok) {
+/**
+ * Bắn Telegram và đẩy Google Sheet, rồi ghi kết quả từng kênh vào D1.
+ *
+ * Đơn nào `notified = 0` là chưa báo Telegram được (`notify_error` cho biết
+ * vì sao); `synced = 0` là chưa vào Sheet được (`sync_error`). Hai kênh độc
+ * lập — một cái lỗi không ảnh hưởng cái kia, và đơn thì vẫn nằm trong D1.
+ */
+
+async function dispatchOrder(
+  env: Env,
+  order: DispatchInput,
+): Promise<void> {
+  // Chạy song song: Telegram và Sheet độc lập nhau, một cái lỗi không nên
+  // chặn cái kia. allSettled để không có promise nào bị bỏ rơi.
+  const [tg, sheet] = await Promise.allSettled([
+    notifyOrder(env, order),
+    syncToSheet(env, {
+      id: order.id,
+      createdAtIso: order.createdAtIso,
+      name: order.name,
+      phone: order.phone,
+      address: order.address,
+      qty: order.qty,
+      total: order.total,
+    }),
+  ]);
+
+  // Promise bị reject (lỗi ngoài dự kiến) cũng phải thành lý do đọc được,
+  // không được để nó biến thành "thất bại không rõ nguyên nhân".
+  const settle = (
+    r: PromiseSettledResult<{ ok: boolean; reason?: string }>,
+  ): { ok: boolean; reason: string | null } =>
+    r.status === "fulfilled"
+      ? { ok: r.value.ok, reason: r.value.ok ? null : (r.value.reason ?? "lỗi không rõ") }
+      : { ok: false, reason: String(r.reason).slice(0, 300) };
+
+  const tgResult = settle(tg);
+  const sheetResult = settle(sheet);
+
+  // Chỉ log trạng thái, không log nội dung đơn (chứa dữ liệu cá nhân).
+  log("order.dispatched", {
+    id: order.id,
+    telegram: tgResult.ok,
+    sheet: sheetResult.ok,
+  });
+
+  if (!tgResult.ok) {
     console.error(
-      JSON.stringify({
-        event: "notify_failed",
-        id: order.id,
-        reason: result.reason,
-      }),
+      JSON.stringify({ event: "notify_failed", id: order.id, reason: tgResult.reason }),
+    );
+  }
+  if (!sheetResult.ok) {
+    console.error(
+      JSON.stringify({ event: "sync_failed", id: order.id, reason: sheetResult.reason }),
     );
   }
 
   try {
     await env.DB.prepare(
       `UPDATE orders
-          SET notified = ?2, notified_at = datetime('now'), notify_error = ?3
+          SET notified = ?2, notified_at = datetime('now'), notify_error = ?3,
+              synced   = ?4, synced_at   = datetime('now'), sync_error   = ?5
         WHERE id = ?1`,
     )
-      .bind(order.id, result.ok ? 1 : 0, result.ok ? null : result.reason)
+      .bind(
+        order.id,
+        tgResult.ok ? 1 : 0,
+        tgResult.reason,
+        sheetResult.ok ? 1 : 0,
+        sheetResult.reason,
+      )
       .run();
   } catch (err) {
     // Ghi trạng thái thất bại thì bỏ qua — đơn vẫn còn, đó là thứ quan trọng.
     console.error(
       JSON.stringify({
-        event: "notify_record_failed",
+        event: "dispatch_record_failed",
         id: order.id,
         message: err instanceof Error ? err.message : String(err),
       }),
@@ -288,7 +334,23 @@ export default {
     }
 
     if (url.pathname === "/api/health") {
-      return json({ ok: true, ts: new Date().toISOString() });
+      // Chẩn đoán: cho biết Worker đang gọi deployment Apps Script NÀO.
+      // Chỉ lộ 10 ký tự đầu của deployment id — đủ để đối chiếu với giao
+      // diện Apps Script, không đủ để dựng lại URL. Ghi vào Sheet vẫn cần
+      // SHEET_SECRET nên biết đoạn này cũng không làm được gì.
+      const sheetUrl = String(env.SHEET_WEBHOOK_URL ?? "").trim();
+      const idMatch = sheetUrl.match(/\/macros\/s\/([^/]+)\//);
+
+      return json({
+        ok: true,
+        ts: new Date().toISOString(),
+        telegram_configured: Boolean(
+          String(env.TELEGRAM_BOT_TOKEN ?? "").trim() &&
+            String(env.TELEGRAM_CHAT_ID ?? "").trim(),
+        ),
+        sheet_configured: Boolean(sheetUrl && String(env.SHEET_SECRET ?? "").trim()),
+        sheet_deployment: idMatch ? idMatch[1].slice(0, 10) + "…" : null,
+      });
     }
 
     // Path không khớp -> để asset Worker xử lý (serve file tĩnh).
