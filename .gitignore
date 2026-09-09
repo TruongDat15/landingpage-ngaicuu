@@ -1,2 +1,11 @@
 node_modules/
 .wrangler/
+
+# Secrets cho dev local — TUYỆT ĐỐI không commit.
+# Pattern theo khuyến nghị của Cloudflare:
+# developers.cloudflare.com/workers/configuration/secrets/
+.dev.vars*
+.env*
+
+# ...nhưng file mẫu thì có, vì nó không chứa giá trị thật.
+!.env.example
